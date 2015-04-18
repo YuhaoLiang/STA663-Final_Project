@@ -1,0 +1,9 @@
+# This Makefile is used to generate the final document
+
+KmeansParallel.pdf: Main.ipynb Outlines.ipynb Test.ipynb
+
+# Helper
+
+.PHONY: clean
+clean:
+	rm -f KmeansParallel.pdf

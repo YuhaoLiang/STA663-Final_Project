@@ -1,0 +1,120 @@
+\documentclass{article}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{pythontex}
+
+\begin{document}
+
+\title{Scalable K-means++ Python implementation}
+\author{Yuhao Liang}
+\maketitle
+
+\section{Background}
+
+So far, k-means still remains one of the most popular data processing algorithms. It is a widely used technique for statistical data analysis in many fields, such as machine learning, pattern recognition, image analysis and bioinformatics. However, general k-means algorithm with random initialization is not a good clustering algorithm in terms of efficiency and quality, which means it needs a long time to converge when the data set is large and it may just converge to the local optimum. In order to improve the quality, we need to improve the initialization part of the k-means algorithm first, selecting the right centers to do clustering. Recently people have proposed k-means++ initialization algorithm, obtaining the initial centers which can be provably close to the optimal solution, largely improves the quality of k-means algorithm but the problem of inefficiency is still unsolved. Now, there is a new algorithm, k-means||, obtaining a nearly optimal solution after a logarithmic number of passes.
+
+Basically, k-means|| is based on k-means++ and the largest difference between these two algorithm is the initialization part of the algorithm. Since the initialization of k-means++ is deterministic (the previous choices that affect which points are choosed in the current solution), it is nearly impossible to use parallelized computation to improve efficiency. Instead, k-means|| algorithm samples each point independently in each round and repeat the process for approximately O(log $\phi$) rounds, which can be easily implemented by means of parallel computation. Besides, $\phi$ is the cluster cost of initial randomly picked center, which can be viewed as sum of the distances between initial center and other points.
+
+
+\section{Implementation}
+
+k-means|| is a parallel version for initializing the centers of k-means clustering method. This algorithm is somehow intuitively similar to k-means++ while the main difference is the usage of an oversampling factor $l = \Omega(k)$, some linear function of $k$.
+In the first step, we sample a point $C$ uniformly at random from data set as an initial center and compute the cost of this clustering center $\psi = \phi_X(C)$, where
+\begin{equation}
+\phi_X(C) = \sum_{x\in X} d^2(x,C) = \sum_{x\in X} min_{c_i \in C} ||x-c_i||^2
+\end{equation}
+Then we run a log$\varphi$ iterations for loop, where in each iteration, we samples each point $x$ in data set $X$ with probability $\frac{ld^2(x, C)}{\phi_X(C)}$, given current cluster center set $C$. 
+We update $C$ with adding the sampled points and update the cluster cost quantity $\phi_X(C)$. Then we run next iteration until the for loop is completed. 
+According to the sampling probability of each data points in each iteration in for loop, the expected number of points sampled in each iteration is $l$. Thus, finally the expected number of points we sampled is $l$log$\psi$, which is expected to be more than k. 
+Therefore we have to reduce the number of centers and we assigns weights to the points in $C$ according to number of points in data set $X$ which the center are closer to them than any other centers.
+\begin{equation}
+\omega(c_i) =  \frac{\sum_{x\in X} 1_{(d^2(x,c_i) < d^2(x,C/\{c_i\}))}}{|X|}
+\end{equation}
+
+With the weight, we can reclusters these potential cluster centers to obtain k centers. In this step we combine the idea of k-means ++ with weight we obtain in last step. In other words, we sample k cluster centers by means of k-means ++ initialization method but we combine weight and distance when we compute the cost of the cluster centers. Firstly, we sample a center, $C_{final}$, from $C$ randomly with probability as weight $\vec{\omega}$. 
+Then we run a $k-1$ iteration for loop, to obtain the rest of cluster centers, where in each iteration, we samples each point $c_i$ in set $C$ with probability $\frac{d^2(c_i, C)\omega(c_i)}{\phi_C(C_{final})}$, given current cluster center set $C$. 
+We update $C_{final}$ with adding the sampled points and update the cluster cost quantity $\phi_C(C_{final})$. Then we run next iteration until the for loop is completed. 
+\begin{equation}
+\phi_C(C_{final}) = \sum_{c_i\in C} d^2(c_i,C_{final}) \omega(c_i)
+\end{equation}
+where $C_{final}$ is the final cluster center set.
+
+Notice that the size of C is significantly smaller than the input size which means the reclustering can be done quickly. 
+
+\section{Test}
+
+As to guarantee the program works as I want, I do some unit test for different functions I used in the algorithm:
+
+\begin{itemize}
+  \item cost function - non_negativity
+  \item cost function - if c has more points cost should be smaller
+  \item cost function - if c has all points cost should be 0
+  \item probability in sampling is non negative
+  \item sum of probability in sampling is l (oversampling factor)
+  \item point in C of probability in sampling is 0
+  \item find number of closet points function - non negative integer
+  \item sum of the weight from weight function should be one
+  \item the weight from weight function should be non-negative
+  \item total levels of labels of KmeansParallel function should be the same as the number of cluster we want
+  \item number of labels should be equal to the number of data
+\end{itemize}
+
+
+\section{Optimization}
+
+For optimization, I use Cython and multiple processing to improve the efficiency of the algorithm rather than MapReduce as the author suggested, since it is hard to implement in iPython Notebook server if we need to use the result from MapReduce to MapReduce in a for loop. Overall, I have 3 version of optimization code:
+
+\begin{itemize}
+  \item Just Cythonize the code directly - version C
+  \item Separate some tasks in the algorithm to sse multiple coresvfor multiple processing - version mc
+\end{itemize}
+
+\section{Results}
+
+In order to compare the efficiency between different algorithms and implementations, I first simulate some data following a mixture of normal distribution. With this data, I plot the clustering result and compare the time that different algorithms used.
+
+See Table~1
+
+\begin{minipage}{\textwidth}
+  \centering{\input{table} }
+  \medskip
+
+  Table 1: Simulated Data.
+
+  \medskip
+
+  \label{tbl:hits}
+\end{minipage}
+
+
+\begin{figure}
+\includegraphics[width=\linewidth]{K-meansPlusPlus.png}
+\caption {Cluster from K-means++}
+\label{fig:K-MeansPlusPlus}
+\end{figure}
+See Figure~1.
+
+
+\begin{figure}
+\includegraphics[width=\linewidth]{K-meansParallel.png}
+\caption {Cluster from K-means||}
+\label{fig:K-MeansParallel}
+\end{figure}
+See Figure~\ref{fig:K-MeansParallel}.
+
+
+\begin{figure}
+\includegraphics[width=\linewidth]{K-meansParallel_MC.png}
+\caption {Cluster from K-means|| by means of Multiple Processing}
+\label{fig:K-MeansParallel_MC}
+\end{figure}
+See Figure~\ref{fig:K-MeansParallel_MC}.
+
+
+\section{Conclusions}
+
+From the cluster map, we can see both K-means++ and scalable K-means have very similar initial centers which are very close to the true centers and make good clustering. In other words, we can consider both algorithms have nearly the same performance. As to the efficiency, when the input data set is small, just 6000 2-Dim points, 
+
+However, when the input data set gets larger and larger, the scalable K-means algorithm implemented with multiple processing has higher efficiency than others, even though I can only use 2 CPU in the iPython Notebook server.
+
+\end{document}

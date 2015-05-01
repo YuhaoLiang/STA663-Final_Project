@@ -1,4 +1,4 @@
-report.pdf: report.tex table.tex K-MeansPlusPlus.png K-meansParallel.png K-meansParallel_C.png K-meansParallel_MC.png
+report.pdf: report.tex table.tex K-MeansPlusPlus.png K-meansParallel.png K-meansParallel_MC.png
 	pdflatex report
 	pdflatex report
 	pdflatex report
